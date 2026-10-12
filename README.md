@@ -9,7 +9,7 @@ Love number $k_\ell = A_{\rm dec}/B_{\rm grow}$ is extracted from the trained
 solution. Because the static problem has an exact solution, the error of the
 solver and the error of the extracted Love number can be measured separately.
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/YOUR-USERNAME/pinn-love-numbers/blob/main/run_scan.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/majoquark/pinn-love-numbers/blob/main/run_scan.ipynb)
 
 ## Files
 
