@@ -1,59 +1,8 @@
 """
 LOVE NUMBERS via PINN  --  v7
 =============================================================================
-v7 changes (on top of v6):
-  [V7-1] PROGRESS_EVERY: train() prints the running loss every N epochs by
-         default, so a long run is visibly alive.  Set PROGRESS_EVERY = 0 to
-         silence it.  The held-out loss is still evaluated every
-         HOLDOUT_EVERY epochs, which is what model selection uses.
-  [V7-2] table_sobolev checkpoints every run to JSON and skips runs already
-         present, so a Colab disconnect costs one run rather than the table.
-         It also prints each row as soon as its seeds finish, and the
-         equal-wall-clock block can be turned off.
-  [V7-3] table_ampmap reports A_B alongside A_A, so the claim that only
-         A_dec is amplified is demonstrated across the map rather than
-         asserted at one configuration.
-=============================================================================
-Changes from v5.1, in order of importance.  Each is marked [V6-n] in the code.
-
-[V6-1] EXACT EXPONENT.  v5.1 used the integer N_int = 2*ell_int+1 both as the
-       shift in the tilded parameters (a-N, b-N) and as the power in the basis
-       f1 = (1-z)^N.  The exact exponent is N_ex = a+b-c = 2*ell+1 = N_int+2eps.
-       The two differ by (1-z)^(-2eps) = 1 + 9.2 eps at z=0.99, i.e. at the same
-       order as the quantity being measured.  With the exact exponent the tilded
-       parameters are exactly (c-b, c-a, c) and the decomposition
-       ytilde = A f1 + B f2 is an identity.
-       Set Config(exact_exponent=False) to reproduce the v5.1 behaviour.
-
-[V6-2] FLOAT64.  v5.1 ran the network in float32 against a 50-digit basis.
-
-[V6-3] NO INTERPOLATION.  v5.1 built the Frobenius reference on an 800-point
-       grid and then np.interp'd it, injecting ~1e-6 errors -- ten orders of
-       magnitude above the series itself.  Methods 3 and 6b were fitting the
-       piecewise-linear interpolant.  The series is now evaluated directly at
-       every requested point (Horner, mpmath, cached).
-
-[V6-4] FROBENIUS ANALOGUES FOR 6a AND 7.  v5.1 had no noise-free input for
-       these, yet claimed the whole local family failed on exact input.
-
-[V6-5] HELD-OUT MODEL SELECTION.  v5.1 kept the snapshot with the lowest
-       *sampled* batch loss over thousands of draws, which selects favourable
-       batches rather than good parameters and biases the reported floor down.
-
-[V6-6] MULTI-SEED.  Median and range over seeds.
-
-[V6-7] AMPLIFICATION FACTORS.  Each linear estimator is exposed as an explicit
-       operator L with (A,B) = L y, so A_A = ||L[0,:]|| ||y|| / |A| can be
-       computed with no training at all.
-
-[V6-8] TRUNCATION.  3000 terms for values, 12000 for the N-th derivative.
-
-Global knobs: EPOCHS, LAM_H1, LAM_H2 (see [V6-11] below).
-
-Drivers at the bottom; set TASKS to choose.  Cheap tasks (no training):
-    baseline, convention, amplification, ampmap, contamination
-Expensive tasks (training):
-    sobolev, scan, lms, convergence
+Auhtor : Maria J Rodriguez
+Last Update: Oct 12, 2026
 =============================================================================
 """
 
@@ -551,11 +500,6 @@ class PINN(nn.Module):
 
 
 def derivatives(model, z, order=4):
-    """[V6-11] `order` caps how many autograd passes are taken.  With
-    lam_h2 = 0 the fourth derivative is never used, and with lam_h1 = 0 the
-    third is not either; computing them anyway would make an H2-vs-L2
-    wall-clock comparison meaningless, since the cost is dominated by the
-    autograd passes rather than by the algebra."""
     z = z.requires_grad_(True)
     u, v = model(z)
     g = lambda f: torch.autograd.grad(f.sum(), z, create_graph=True)[0]
@@ -636,12 +580,6 @@ def train(cfg, n_epochs=None, n_pts=400, hidden=128, depth=4,
           z_min=0.01, z_max=0.99, lr=1e-3, seed=0, verbose=True,
           holdout_pts=4000, checkpoints=None, importance=False,
           lam_h1=None, lam_h2=None):
-    """[V6-5] model selection on a FIXED held-out grid, not the training batch.
-       checkpoints: optional sorted list of epoch numbers at which to stash a
-       copy of the state dict (used by the convergence study).
-       [V6-11] n_epochs defaults to EPOCHS, lam_h1/lam_h2 to LAM_H1/LAM_H2.
-       Model selection uses the SAME lambdas as training, so the held-out
-       loss is comparable across epochs but NOT across different lambdas."""
     if n_epochs is None:
         n_epochs = EPOCHS
     if lam_h1 is None:
@@ -913,8 +851,6 @@ def errors(cfg, AB):
 # TABLE DRIVERS
 # =============================================================================
 def table_baseline(configs=None, eps_list=(1e-2, 1e-5)):
-    """Table: all eight estimators on the Frobenius series (no network).
-    Any error here is a property of the estimator."""
     if configs is None:
         configs = [(2, 2, 2), (1, 1, 1)]
     print("\n" + "=" * 104)
@@ -950,10 +886,6 @@ def table_baseline(configs=None, eps_list=(1e-2, 1e-5)):
 
 
 def table_truncation(cfg=None, n_list=(500, 1000, 3000, 8000, 12000)):
-    """[V6-12] Certify the series truncation against the closed form, for the
-    VALUE and for the N-th derivative.  The derivative is the demanding case:
-    the coefficients decay as n^-(1+Nex) but term-by-term differentiation
-    boosts them by ~n^N, leaving ~n^-1 near z=1."""
     cfg = cfg or Config(2, 2, 2, 1e-5)
     fr = Frobenius(cfg)
     N = cfg.N_int
@@ -971,9 +903,6 @@ def table_truncation(cfg=None, n_list=(500, 1000, 3000, 8000, 12000)):
 
 
 def table_convention(cfg_seed=(2, 2, 2), eps_list=(1e-1, 1e-2, 1e-3, 1e-4, 1e-5)):
-    """[V6-1] integer vs exact exponent, integral-residual estimator on the
-    Frobenius series.  No network.  The left block reproduces the spurious
-    O(eps) 'conditioning floor' of v5.1."""
     s, l, m = cfg_seed
     print("\n" + "=" * 88)
     print("TABLE: exponent convention  (integral residual on Frobenius series)")
@@ -1008,9 +937,6 @@ def table_amplification(configs=((2, 2, 2), (1, 1, 1)), eps=1e-3):
 
 
 def table_contamination(cfg_seed=(2, 2, 2), eps_list=(1e-2, 1e-4, 1e-5, 1e-8)):
-    """What the local estimators actually return: A_eff = A + B c_N.
-    At eps=0 this is the N-th Taylor coefficient of a degree-(l+s) polynomial,
-    hence identically zero.  c_N is FINITE and tends to -k_ell."""
     s, l, m = cfg_seed
     N = 2 * l + 1
     print("\n" + "=" * 96)
@@ -1039,18 +965,6 @@ def table_contamination(cfg_seed=(2, 2, 2), eps_list=(1e-2, 1e-4, 1e-5, 1e-8)):
 # [V6-15] AMPLIFICATION MAP OVER (s, ell, m)   --  NO TRAINING
 # =============================================================================
 def parameters_supported(cfg):
-    """False when c = 1-s+2i m gamma is a non-positive integer.
-
-    That happens exactly when m*gamma = 0 and s >= 1.  The regulator does NOT
-    lift it, because ell does not appear in c.  In that case:
-      * Gamma(c) is on a pole, so A_dec and B_grow do not exist separately
-        (their ratio k_ell does, since Gamma(c) cancels);
-      * the horizon exponents 0 and 1-c = s differ by an integer, so z=0 is
-        degenerate too;
-      * the Frobenius recursion divides by (n + ct) = 0 at n = s-1.
-    Schwarzschild and axisymmetric Kerr perturbations with s >= 1 therefore
-    need a regulator acting on s or on c, not on ell.  s = 0, m = 0 is fine
-    (c = 1)."""
     cr = complex(cfg.c_mp)
     if abs(cr.imag) > 1e-30:
         return True
@@ -1064,17 +978,7 @@ def table_ampmap(s_list=(2,), ell_list=(2, 3, 4, 5), m_list=None, eps=1e-3,
                  estimators=("1. Integral residual", "2. Moment matching",
                              "5. Weighted LS"),
                  eps_y=1e-5, include_two_point=False):
-    """[V6-15] Amplification factor across angular numbers.  Requires no
-    training, so the usable range of (s, ell, m) can be mapped in advance.
 
-    Reports |A_dec|, k_ell, cond M and A_A for each estimator, and the
-    predicted observable error eps_A = A_A * eps_y for a solver of the given
-    quality.  Rows with c a non-positive integer are skipped with a note.
-
-    The two-point estimator (Method 3) is off by default: its design matrix
-    has cond M > 1e16 for N > 7, so in double precision the pseudo-inverse
-    discards the singular direction carrying A_dec and the computed A_A is an
-    artifact.  Set include_two_point=True to see it, with a warning flag."""
     ests = list(estimators) + (["3. Singular asymptotic"]
                                if include_two_point else [])
     print("\n" + "=" * (52 + 14 * len(ests)))
@@ -1391,26 +1295,7 @@ def table_sobolev(cfg_seed=(2, 2, 2), eps=1e-3, seeds=(0, 1, 2),
                   n_epochs=None, report="1. Integral residual",
                   variants=None, equal_walltime=True,
                   checkpoint="sobolev.json", resume=True):
-    """[V7-2] Does the Sobolev loss help?
-
-    Trains the same architecture at the same configuration with different
-    (lam_h1, lam_h2) and compares BOTH links of the chain: the solution error
-    eps_y and the coefficient error eps_A.  The two need not improve together,
-    which is the point of the paper.
-
-    Every completed run is appended to `checkpoint` (JSON) immediately, and on
-    restart any run already present is skipped.  A disconnect therefore costs
-    one run, not the table.  Pass checkpoint=None to disable, resume=False to
-    recompute.
-
-    Two caveats handled here:
-      * the held-out loss is NOT comparable across variants, since each is the
-        value of a different objective.  Compare eps_y and eps_A.
-      * the H2 loss needs four autograd passes per step against two for the
-        plain L2, so equal epochs is not equal cost.  With
-        equal_walltime=True the cheaper variants are re-run with the epoch
-        count scaled by the measured time ratio.
-    """
+  
     import json
     if n_epochs is None:
         n_epochs = EPOCHS
@@ -1650,18 +1535,7 @@ def plot_profiles(cfg_seed=(2, 2, 2), eps=1e-5, seed=0, n_epochs=None):
 def table_sidebyside(cfg_seed=(2, 2, 2), eps=1e-3, seeds=(0, 1, 2),
                      n_epochs=None, checkpoint="sidebyside.json",
                      resume=True):
-    """[V7-6] The main diagnostic of the paper.
-
-    The SAME eight estimators are driven by two inputs: the trained network
-    and the exact Frobenius series.  The Frobenius column is a property of the
-    estimator alone and no solver can improve it; the difference between the
-    columns is the solver's contribution.  For the five linear estimators the
-    prediction A_A * eps_y is shown alongside, so the table tests
-    Eq.(amp) estimator by estimator at the network's own eps_y rather than at
-    machine precision.
-
-    Cost is one training run per seed: the eight estimators are then evaluated
-    on the same model, which is cheap.  Runs are checkpointed."""
+    
     import json
     if n_epochs is None:
         n_epochs = EPOCHS
@@ -1760,24 +1634,7 @@ def run_all(n_epochs=5000, seeds=(0, 1, 2), cfg_seed=(2, 2, 2),
             cheap=True, sobolev=True, sidebyside=True, scan=True, lms=True,
             convergence=False, equal_walltime=False,
             lms_rows=((2, 2, 2), (2, 3, 1), (2, 4, 1))):
-    """Everything, in the order that maximises information per hour.
-
-    Phase 0  cheap    minutes, no training, cannot be invalidated later.
-    Phase 1  sobolev  the only untested claim in the method section.
-    Phase 2  side     all eight estimators, network vs Frobenius input.
-                      The paper's main diagnostic.
-    Phase 3  scan     the Love-number table, in eps at one (s,l,m).
-    Phase 4  lms      the (s,l,m) dependence of the NETWORK results, against
-                      the training-free prediction of phase 0.
-    Phase 5  converge optional; the amplification relation swept in eps_y.
-
-    Phases 1-3 checkpoint every run to JSON, so a disconnect resumes where it
-    stopped: just call run_all() again with the same arguments.  Training
-    prints a heartbeat every PROGRESS_EVERY epochs.
-
-    Run counts at the defaults: phase 1 is 9 runs, phase 2 is 3, phase 3 is
-    15, phase 4 is 9 -- 36 training runs.  Time one run first and multiply.
-    """
+    
     t00 = time.time()
 
     def banner(n, name, note=""):
@@ -1835,17 +1692,6 @@ def run_all(n_epochs=5000, seeds=(0, 1, 2), cfg_seed=(2, 2, 2),
     print("#" * 78, flush=True)
 
 
-# =============================================================================
-# MAIN
-# =============================================================================
-# Cheap tasks run in a few minutes on CPU and need no GPU.
-# "sobolev" TRAINS: 3 variants x SOBOLEV_SEEDS seeds at SOBOLEV_EPOCHS, plus
-# 2 more variants for the equal-wall-clock block.  Smoke-test it first with
-#     table_sobolev(seeds=(0,), n_epochs=400)
-# before running the full thing.
-# =============================================================================
-# Run everything with one call.  Re-running resumes from the JSON checkpoints.
-# =============================================================================
 if __name__ == "__main__":
     print("=" * 72)
     print(f"device={device}  dtype={torch.get_default_dtype()}  mp.dps={mp.mp.dps}")
