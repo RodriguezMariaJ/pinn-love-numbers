@@ -1,4 +1,4 @@
-# Black hole Love numbers with physics-informed neural networks
+# Black hole Love numbers with Physics-Informed Neural Networks
 
 Code for the paper *Black Hole Love Numbers with Physics-Informed Neural Networks*
 (P. Protopapas, L. F. Temoche, M. J. Rodríguez).
